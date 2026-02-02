@@ -1,14 +1,14 @@
 
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import { PostSize, DesignStyle, GroundingSource, TemplateSuggestion, FileAttachment } from "../types";
+import { PostSize, DesignStyle, GroundingSource, TemplateSuggestion, FileAttachment } from "../types.ts";
 
-// Removed intermediate API_KEY variable to comply with initialization guidelines
 export class GeminiService {
   private ai: GoogleGenAI;
 
   constructor() {
-    // Always use process.env.API_KEY directly
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Ensure API_KEY is available; the shim in index.html helps prevent crashes
+    const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : '';
+    this.ai = new GoogleGenAI({ apiKey: apiKey as string });
   }
 
   async correctText(text: string): Promise<string> {
@@ -32,7 +32,6 @@ export class GeminiService {
       I have also attached some reference documents/images. Please use their content to provide a highly relevant summary for a social media post.` }
     ];
 
-    // Add PDFs and Images as multi-modal context for research
     attachments.forEach(file => {
       if (file.type === 'image' || file.type === 'pdf') {
         parts.push({
@@ -42,7 +41,6 @@ export class GeminiService {
           }
         });
       } else {
-        // For other documents, we mention them by name in the text part if we can't process raw bytes
         parts[0].text += `\nReference File Attached: ${file.name}`;
       }
     });
@@ -131,10 +129,20 @@ export class GeminiService {
     const stylesString = styles.join(", ");
     const referenceImage = attachments.find(a => a.type === 'image');
     
-    let promptText = `A professional social media poster for "${topic}". Styles: ${stylesString}. ${instructions || ''} Format: ${size} aspect ratio.`;
+    // Normalize aspect ratio for Gemini: it only accepts specific strings
+    let geminiAspectRatio: "1:1" | "4:3" | "3:4" | "16:9" | "9:16" = "1:1";
+    if (Object.values(PostSize).includes(size as any)) {
+      geminiAspectRatio = size as any;
+    }
+
+    let promptText = `A premium quality social media poster or advertisement for "${topic}". 
+    Style characteristics: ${stylesString}. 
+    Additional context: ${instructions || ''} 
+    The layout should be professional and suitable for ${size === PostSize.INSTAGRAM ? 'Instagram' : size === PostSize.A4_PORTRAIT ? 'A4 Portrait' : 'a social media feed'}.`;
 
     if (referenceImage) {
-      promptText = `Reimagine the attached reference image as a professional social media poster for "${topic}". Maintain the composition but enhance it with: ${stylesString}. ${instructions || ''}`;
+      promptText = `Using the attached reference image as a base, generate a high-end social media poster for "${topic}". 
+      Maintain similar structure but apply these styles: ${stylesString}. ${instructions || ''}`;
     }
 
     const parts: any[] = [{ text: promptText }];
@@ -151,12 +159,11 @@ export class GeminiService {
       model: 'gemini-2.5-flash-image',
       contents: { parts },
       config: {
-        imageConfig: { aspectRatio: size as any },
+        imageConfig: { aspectRatio: geminiAspectRatio },
       },
     });
 
     let imageUrl = "";
-    // Iterate through candidates and parts to find the image part as per guidelines
     for (const part of response.candidates?.[0]?.content?.parts || []) {
       if (part.inlineData) {
         imageUrl = `data:image/png;base64,${part.inlineData.data}`;
